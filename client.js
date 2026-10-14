@@ -72,7 +72,17 @@ window.__ModuleLoader__.load({
 
     const fmt = value => Math.round(Number(value) || 0).toLocaleString()
     const when = ms => (typeof ms === 'number' && Number.isFinite(ms) && ms > 0 ? new Date(ms).toLocaleString() : '未知')
-    const shortKey = key => (typeof key === 'string' && key.length > 8 ? `…${key.slice(-8)}` : key || '—')
+    /**
+     * 账号显示名：昵称优先，否则用 Access Key。**整串显示、不截断** ——
+     * 截成 `…9T8E5150` 时两个账号看着一样，认不出哪个是哪个。
+     */
+    const accountName = account => {
+      const nickname = typeof account?.nickname === 'string' ? account.nickname.trim() : ''
+      if (nickname.length > 0) return nickname
+      const key = account?.accessKey
+      if (typeof key === 'string' && key.length > 0) return key
+      return account?.id ?? '—'
+    }
 
     // ── 小组件 ──
     function chip(label, onClick, opts) {
@@ -84,6 +94,7 @@ window.__ModuleLoader__.load({
         key: opts?.key,
         onClick: disabled ? undefined : onClick,
         disabled,
+        title: opts?.title,
         style: {
           padding: '4px 10px', borderRadius: 8, fontSize: 12, cursor: disabled ? 'default' : 'pointer',
           border: `1px solid ${primary ? C.accent : C.border}`,
@@ -111,36 +122,94 @@ window.__ModuleLoader__.load({
 
     // ── 账号行 ──
     function AccountRow(props) {
-      const { account, busy, onTest, onRefresh, onToggle, onRemove } = props
+      const { account, credit, busy, index, count, onTest, onRefresh, onToggle, onRemove, onRename, onMove } = props
       const [testText, setTestText] = useState('')
+      const [editing, setEditing] = useState(false)
+      const [draft, setDraft] = useState('')
+      const [showBreakdown, setShowBreakdown] = useState(false)
+      /** 该账号的积分组成：点账号名或积分数时展开，平时不占地方 */
+      const packages = credit?.ok === true && Array.isArray(credit.packages) ? credit.packages : []
+      const expandable = packages.length > 0
+
+      /** 提交改名：留空 = 清掉昵称，回到用 Access Key 显示 */
+      const commitRename = () => {
+        setEditing(false)
+        void onRename(account, draft.trim())
+      }
       return h('div', {
         style: { padding: '8px 0', borderTop: `1px solid ${C.border}` }
       },
         h('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
-          h('span', { style: { fontSize: 13, color: C.text } }, account.nickname || shortKey(account.accessKey)),
+          editing
+            ? h('input', {
+              autoFocus: true,
+              value: draft,
+              placeholder: '起个名（留空＝仍用 Access Key）',
+              onChange: (event) => setDraft(event.target.value),
+              onKeyDown: (event) => {
+                if (event.key === 'Enter') commitRename()
+                else if (event.key === 'Escape') setEditing(false)
+              },
+              style: {
+                flex: 1, minWidth: 150, fontSize: 13, padding: '3px 8px', borderRadius: 8,
+                border: `1px solid ${C.border}`, background: C.bg2, color: C.text, outline: 'none'
+              }
+            })
+            : h('span', {
+              onClick: expandable ? () => setShowBreakdown((open) => !open) : undefined,
+              title: expandable ? '点击看这个账号的积分组成' : undefined,
+              style: { fontSize: 13, color: C.text, wordBreak: 'break-all', cursor: expandable ? 'pointer' : 'default' }
+            }, accountName(account)),
           badge(account.enabled ? '启用' : '已停用', account.enabled ? 'ok' : undefined),
+          // 本账号的积分就摆在「启用」后面 —— 比在卡片底部再列一遍更好认
+          credit?.ok === true
+            ? h('span', {
+              onClick: expandable ? () => setShowBreakdown((open) => !open) : undefined,
+              title: expandable ? '点击看这个账号的积分组成' : undefined,
+              style: { fontSize: 12, color: C.ok, cursor: expandable ? 'pointer' : 'default' }
+            }, `${fmt(credit.total)} 积分${expandable ? (showBreakdown ? ' ▾' : ' ▸') : ''}`)
+            : null,
           account.limitedUntil > 0 ? badge(`限流至 ${when(account.limitedUntil)}`, 'bad') : null,
           h('span', { style: { flex: 1 } }),
           h('span', { style: { fontSize: 11, color: C.faint } },
             account.expiresAt === null ? '到期未知' : `到期 ${when(account.expiresAt)}`)),
+        // 展开的积分组成：紧跟被点的那一行，不点就一直不占地方
+        showBreakdown && expandable
+          ? h('div', { style: { fontSize: 11, color: C.faint, marginTop: 4, wordBreak: 'break-all' } },
+            // 用 remaining（剩余）而不是 total（额度），这样各包加起来 = 账号那行显示的积分
+            `剩余：${packages.map((p) => `${p.name} ${fmt(p.remaining ?? p.total)}`).join(' · ')}`)
+          : null,
         h('div', { style: { display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap', alignItems: 'center' } },
-          chip('测试', async () => {
-            setTestText('测试中…')
-            try {
-              const result = await get(`/accounts/${encodeURIComponent(account.id)}/test`, 60000)
-              setTestText(result.ok === true ? `连接正常（${result.models} 个模型 · ${result.ms}ms）` : `测试失败：${result.error ?? '未知'}`)
-            } catch (error) {
-              setTestText(`测试失败：${String(error?.message ?? error)}`)
-            }
-          }, { disabled: busy !== '' }),
-          chip(busy === `refresh-${account.id}` ? '续期中…' : '续期', () => onRefresh(account), { disabled: busy !== '' }),
-          chip(account.enabled ? '停用' : '启用', () => onToggle(account), { disabled: busy !== '' }),
-          chip('移除', () => onRemove(account), { disabled: busy !== '', danger: true }),
-          testText.length > 0
-            ? h('span', {
-              style: { fontSize: 11, color: testText.startsWith('测试失败') || testText.startsWith('连接失败') ? C.bad : C.faint, wordBreak: 'break-all' }
-            }, testText)
-            : null),
+          ...(editing
+            ? [chip('确定', commitRename, { primary: true, key: 'ok' }),
+              chip('取消', () => setEditing(false), { key: 'cancel' })]
+            : [
+              // 顺序就是对话时的候选优先级，所以箭头放在最前面
+              chip('↑', () => onMove(account, -1), { key: 'up', title: '上移（越靠前越优先被使用）', disabled: busy !== '' || index === 0 }),
+              chip('↓', () => onMove(account, 1), { key: 'down', title: '下移（越靠后越晚被使用）', disabled: busy !== '' || index >= count - 1 }),
+              chip('测试', async () => {
+                setTestText('测试中…')
+                try {
+                  const result = await get(`/accounts/${encodeURIComponent(account.id)}/test`, 60000)
+                  setTestText(result.ok === true ? `连接正常（${result.models} 个模型 · ${result.ms}ms）` : `测试失败：${result.error ?? '未知'}`)
+                } catch (error) {
+                  setTestText(`测试失败：${String(error?.message ?? error)}`)
+                }
+              }, { key: 'test', disabled: busy !== '' }),
+              chip(busy === `refresh-${account.id}` ? '续期中…' : '续期', () => onRefresh(account), { key: 'refresh', disabled: busy !== '' }),
+              chip(account.enabled ? '停用' : '启用', () => onToggle(account), { key: 'toggle', disabled: busy !== '' }),
+              chip('改名', () => {
+                setDraft(account.nickname ?? '')
+                setEditing(true)
+              }, { key: 'rename', disabled: busy !== '' }),
+              chip('移除', () => onRemove(account), { key: 'remove', disabled: busy !== '', danger: true }),
+              testText.length > 0
+                ? h('span', {
+                  key: 'testText',
+                  style: { fontSize: 11, color: testText.startsWith('测试失败') || testText.startsWith('连接失败') ? C.bad : C.faint, wordBreak: 'break-all' }
+                }, testText)
+                : null
+            ])),
         account.modelInfoError.length > 0
           ? h('div', { style: { fontSize: 11, color: C.bad, marginTop: 4, wordBreak: 'break-all' } },
             `上次取网关密钥失败：${account.modelInfoError}（点「续期」重试）`)
@@ -282,11 +351,13 @@ window.__ModuleLoader__.load({
           h('span', { style: { fontSize: 15, color: C.text } }, '果办OfficeAce'),
           h('span', { style: { fontSize: 12, color: C.faint } }, '华为云 AgentArts'),
           h('span', { style: { flex: 1 } }),
+          credits === undefined
+            ? null
+            : credits.error !== undefined
+              ? h('span', { style: { fontSize: 12, color: C.bad } }, '积分读取失败')
+              : h('span', { style: { fontSize: 12, color: C.ok } }, `总积分 ${fmt(credits.total ?? 0)}`),
           h('span', { style: { fontSize: 12, color: C.sub } },
-            `账号 ${enabledAccounts}/${accounts.length}　模型 ${enabledModels}/${models.length}`),
-          credits?.total !== undefined
-            ? h('span', { style: { fontSize: 12, color: C.accent } }, `总积分 ${fmt(credits.total)}`)
-            : null),
+            `账号 ${enabledAccounts}/${accounts.length}　模型 ${enabledModels}/${models.length}`)),
 
         // 动作行
         h('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap' } },
@@ -307,17 +378,16 @@ window.__ModuleLoader__.load({
             setNotice(`领取完成：共 +${fmt(result.claimed ?? 0)}${already > 0 ? `，已领 ${already}` : ''}${failed > 0 ? `，失败 ${failed}` : ''}`)
             await loadCredits()
           }), { disabled: busy !== '' || accounts.length === 0 }),
-          chip('刷新', () => withBusy('load', async () => { await load(true); await loadCredits() }), { disabled: busy !== '' })),
-
-        // 折叠头
-        h('div', { style: { display: 'flex', gap: 16, marginTop: 4 } },
+          chip('刷新', () => withBusy('load', async () => { await load(true); await loadCredits() }), { disabled: busy !== '' }),
+          // 两个折叠开关从原来单独占的那一行，挪到「＋ 添加账号」这一行的右边
+          h('span', { style: { flex: 1 } }),
           h('span', {
             onClick: () => setOpen(open === 'accounts' ? '' : 'accounts'),
-            style: { fontSize: 12, cursor: 'pointer', color: open === 'accounts' ? C.text : C.faint }
+            style: { fontSize: 12, cursor: 'pointer', alignSelf: 'center', color: open === 'accounts' ? C.text : C.faint }
           }, `${open === 'accounts' ? '▾' : '▸'} 账号 (${accounts.length})`),
           h('span', {
             onClick: () => setOpen(open === 'models' ? '' : 'models'),
-            style: { fontSize: 12, cursor: 'pointer', color: open === 'models' ? C.text : C.faint }
+            style: { fontSize: 12, cursor: 'pointer', alignSelf: 'center', color: open === 'models' ? C.text : C.faint }
           }, `${open === 'models' ? '▾' : '▸'} 模型 (${enabledModels}/${models.length})`)),
 
         // 账号区
@@ -326,23 +396,42 @@ window.__ModuleLoader__.load({
             ? h('div', { style: { fontSize: 13, color: C.sub, paddingTop: 6 } },
               '还没有账号——点「＋ 添加账号」在浏览器完成华为云授权。不需要安装 OfficeAce 客户端。')
             : h('div', { style: { display: 'flex', flexDirection: 'column' } },
-              ...accounts.map((account) => h(AccountRow, {
+              ...accounts.map((account, index) => h(AccountRow, {
                 key: account.id,
                 account,
+                index,
+                count: accounts.length,
+                credit: (credits?.accounts ?? []).find((row) => row.id === account.id),
                 busy,
                 onTest: undefined,
                 onRefresh: (row) => withBusy(`refresh-${row.id}`, async () => {
                   await post(`/accounts/${encodeURIComponent(row.id)}/refresh`, {}, 60000)
-                  setNotice(`账号 ${row.id} 已续期`)
+                  setNotice(`${accountName(row)} 已续期`)
                   await load(true)
                 }),
                 onToggle: (row) => withBusy(`toggle-${row.id}`, async () => {
                   await post(`/accounts/${encodeURIComponent(row.id)}/enable`, { enabled: !row.enabled })
                   await load(true)
                 }),
+                // 该路由回的是完整状态，直接 setData —— 账号名一改，积分区那列的显示也跟着变
+                onRename: (row, nickname) => withBusy(`rename-${row.id}`, async () => {
+                  setData(await post(`/accounts/${encodeURIComponent(row.id)}/nickname`, { nickname }))
+                  setNotice(nickname.length > 0 ? `已改名为「${nickname}」` : '已恢复用 Access Key 显示')
+                }),
+                // 宿主收的是「完整排列」，所以在这里把新顺序算好整份发过去
+                onMove: (row, delta) => withBusy(`move-${row.id}`, async () => {
+                  const ids = accounts.map((item) => item.id)
+                  const from = ids.indexOf(row.id)
+                  const to = from + delta
+                  if (from < 0 || to < 0 || to >= ids.length) return
+                  const [moved] = ids.splice(from, 1)
+                  ids.splice(to, 0, moved)
+                  setData(await post('/accounts/reorder', { ids }))
+                  setNotice(`已调整顺序：${accountName(row)} 现在排第 ${to + 1} 位`)
+                }),
                 onRemove: (row) => withBusy(`remove-${row.id}`, async () => {
                   await post(`/accounts/${encodeURIComponent(row.id)}/remove`)
-                  setNotice(`已移除账号 ${row.id}`)
+                  setNotice(`已移除 ${accountName(row)}`)
                   await load(true)
                   await loadCredits()
                 })
@@ -369,22 +458,6 @@ window.__ModuleLoader__.load({
                   setData(await post('/models/disable', { model: row.id, disabled: !row.disabled }))
                 })
               })))
-          : null,
-
-        // 积分
-        accounts.length > 0
-          ? h('div', { style: { borderTop: `1px solid ${C.border}`, paddingTop: 10, marginTop: 4 } },
-            h('div', { style: { fontSize: 13, color: C.text } },
-              credits === undefined
-                ? '积分：查询中…（点「⟳ 积分」重查）'
-                : credits?.error !== undefined ? `积分读取失败：${credits.error}` : `总积分 ${fmt(credits?.total ?? 0)}`),
-            ...(Array.isArray(credits?.accounts) ? credits.accounts : []).map((row) => h('div', {
-              key: `c-${row.id}`,
-              style: { display: 'flex', gap: 10, fontSize: 12, color: C.sub, paddingTop: 2 }
-            },
-              h('span', { style: { minWidth: 64 } }, row.id),
-              h('span', { style: { flex: 1, color: row.ok ? C.text : C.faint } },
-                row.ok ? (row.packages ?? []).map((p) => `${p.name} ${fmt(p.total)}`).join(' · ') : (row.error ?? '—')))))
           : null,
 
         // 登录会话（宿主写进账号池）：失败原因直接摆出来，不用去翻日志
