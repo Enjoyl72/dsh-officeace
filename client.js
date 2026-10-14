@@ -364,10 +364,12 @@ window.__ModuleLoader__.load({
           : null,
 
         // 积分
-        credits !== undefined && accounts.length > 0
+        accounts.length > 0
           ? h('div', { style: { borderTop: `1px solid ${C.border}`, paddingTop: 10, marginTop: 4 } },
             h('div', { style: { fontSize: 13, color: C.text } },
-              credits?.error !== undefined ? `积分读取失败：${credits.error}` : `总积分 ${fmt(credits?.total ?? 0)}`),
+              credits === undefined
+                ? '积分：查询中…（点「⟳ 余额」重查）'
+                : credits?.error !== undefined ? `积分读取失败：${credits.error}` : `总积分 ${fmt(credits?.total ?? 0)}`),
             ...(Array.isArray(credits?.accounts) ? credits.accounts : []).map((row) => h('div', {
               key: `c-${row.id}`,
               style: { display: 'flex', gap: 10, fontSize: 12, color: C.sub, paddingTop: 2 }
