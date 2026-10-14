@@ -1,0 +1,8 @@
+# dsh-officeace bundle patch.
+#
+# 一行 insert 即挂载宿主半身。本包**没有**浏览器半身（不声明 dsh.client）——
+# dsh 没有给"账号登录式渠道"预留 UI 位，登录/积分走 /officeace 命令。
+- insert:
+    - id: officeace
+      name: 'dsh-officeace'
+      config: {}

@@ -1,0 +1,98 @@
+# dsh-officeace
+
+给 **dsh（DeepSeek Harness）** 用的**果办OfficeAce**（华为云 AgentArts）渠道 —— **只含这一条渠道**。
+
+> **为什么单独做一个包**：此前这条渠道是"打在上游插件 `dsh-our-free-model` 里的补丁"，
+> 插件每次**自更新**都会覆盖 `pack.js`/`client.js` 把渠道抹掉；且上游换构建后补丁锚点会全部失效。
+> 本包只依赖 dsh 的内核契约（`ctx.llm` / `ctx.credentials` / `ctx.commands`），
+> **不依赖任何上游插件**，因此与上游更新完全解耦。
+
+---
+
+## 能力
+
+| 能力 | 说明 |
+|---|---|
+| 对话 | 注册 provider `officeace`，模型出现在 dsh 的模型选择器里，直接选即可 |
+| 登录 | **浏览器完成华为云授权**，无需 OfficeAce 客户端、无需 API Key；回调落在本机端口 |
+| 模型清单 | 先试远端 `GET <网关>/v1/models`，失败回落静态集（deepseek-v4.1-flash / deepseek-v4-flash-0731 / glm-5.2 / glm-5.1） |
+| 积分 | `/officeace credits` 列出主积分与各活动池 |
+| 每日领取 | `/officeace claim` |
+| 续期 | 凭据是 ~2 小时的 STS 临时凭据，每 30 分钟自动续期一次（`refresh_token` 一次性，故只在这一个入口续） |
+
+**没有**渠道卡 UI：dsh 没有给"账号登录式渠道"预留任何插槽或 RPC，原插件那套卡片是它自己在
+客户端半身里手写的。本包刻意只做宿主半身 —— 因此更小、更稳、也不受上游 UI 改动影响。
+
+## 安装
+
+```bash
+# 本地目录（开发/自用）
+dsh plugin --profile desktop add file:C:\Users\86195\dsh-officeace
+
+# 或不发布 npm，直接从 GitHub 装
+dsh plugin --profile desktop add github:Enjoyl72/dsh-officeace
+```
+
+装完**重启 dsh**。日志里应出现：
+
+```
+officeace: 渠道已注册（provider "officeace"，凭据引用 OFFICEACE_ACCESS_KEY_ID）
+```
+
+> ⚠️ **同一台机器上只能有一个来源注册 `officeace`**。若你还把本渠道打在上游
+> `dsh-our-free-model` 里（见另一仓的 `apply-officeace.py`），请**先撤掉那份补丁**
+> （从 `*.officeace-bak-*` 备份恢复），否则两个插件抢同一个 provider 路由会报重复注册。
+
+## 使用
+
+在 dsh 里输入（命令面板 / 斜杠命令）：
+
+```
+/officeace login     打开浏览器完成华为云授权（也回一个链接兜底）
+/officeace status    登录态、凭据到期时间、可用模型数
+/officeace models    列出本渠道的模型 id
+/officeace credits   积分明细（主积分 + 各活动池）
+/officeace claim     领取每日奖励
+/officeace logout    清除本机凭据
+```
+
+登录成功后，在模型选择器里选 `officeace/<model>` 即可对话。
+
+## 协议（都是逆向来的，改动前先核对）
+
+```
+1) state      POST https://agentarts.cn-southwest-2.myhuaweicloud.com/v1/claw/auth/state
+2) 授权       GET  https://auth.huaweicloud.com/authui/v1/oauth2/authorize
+                  ?client_id=pdp5_for_agentarts & code_challenge=… & state=… & scope=openid
+                  & redirect_uri=http://127.0.0.1:<port>/oauth/callback & response_type=code
+                  （外层再套 authui/login.html?service=…）
+3) 换 token   POST https://sts.cn-north-4.myhuaweicloud.com/v1/oauth2/tokens   （与 CodeArts 同一个端点）
+                  DPoP: <ES256 JWS>  + 表单（client_id/code/code_verifier/grant_type[/refresh_token]）
+              → credentials.{access_key_id, secret_access_key, security_token, expiration} + refresh_token
+4) 取网关密钥 POST https://agentarts.cn-southwest-2.myhuaweicloud.com/v1/claw/client-subscription
+                  SDK-HMAC-SHA256 签名，头 x-subscription-type: v2
+              → model_info.model_auth_info.{model_app_key, model_app_secret} + model_info.model_api_url_base
+5) 对话       POST <model_api_url_base>/chat/completions        Authorization: Basic base64(appKey:appSecret)
+6) 额度       GET  <origin>/v1/subscription                     V11-HMAC-SHA256 签名，头 x-subscription-type: v2
+   领取       POST <origin>/v1/subscription/bonus/claim         必须 Content-Type: application/json + body {}
+```
+
+`origin` = `model_api_url_base` 去掉尾部 `/v2`。V11 的要点：`scope = <yyyymmdd>/cn-southwest-2/apic`，
+`derived = HMAC(HMAC(ak,sk), scope‖0x01)[0:32]`，`signature = HMAC(**hex(derived)**, stringToSign)`
+（key 是 derived 的**十六进制串**，不是原始字节）。
+
+更完整的逆向记录、以及"打在上游插件里"的那套补丁，见另一仓库
+`Enjoyl72/-OfficeAce-_to_dsh-our-free-model`。
+
+## 已知局限
+
+- **单账号**：只保存一份凭据（引用 `OFFICEACE_ACCESS_KEY_ID`）。多账号未做。
+- **工具历史折成文本**：历史里的 `tool-call`/`tool-result` 转成文本行（兼容面最广），
+  当前请求的 `tools` 仍按原生声明——这样模型能正常调用工具。
+- **不发 `temperature`**：请求体照抄实测可用的形状。
+- **纯逆向**：OfficeAce 客户端 / 华为云 MaaS 一改就可能失效，届时按上面的端点表重新核对。
+
+## 许可
+
+MIT（见 `LICENSE`）。协议细节来自对 OfficeAce 客户端与华为云接口的逆向；本渠道仅供**用户对
+自己账号**的额度接入使用，上游条款与可用性可能随时变化。
