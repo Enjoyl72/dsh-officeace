@@ -13,23 +13,34 @@
 
 | 能力 | 说明 |
 |---|---|
-| **界面卡片** | dsh 的**设置**里有一页「果办OfficeAce」：登录按钮、登录态与到期、网关、模型数、**积分明细**、每日领取、退出 |
+| **界面卡片** | dsh 的**设置**里有一页「果办OfficeAce」：账号列表（启用/到期 + **测试/续期/停用/移除**）、**模型开关区**（已开启 x/y + 全部开启/关闭 + 逐模型开关）、**积分明细**、每日领取 |
 | 对话 | 注册 provider `officeace`，模型出现在 dsh 的模型选择器里，直接选即可 |
-| 登录 | **浏览器完成华为云授权**，无需 OfficeAce 客户端、无需 API Key；回调落在本机端口 |
-| 模型清单 | 先试远端 `GET <网关>/v1/models`，失败回落静态集（deepseek-v4.1-flash / deepseek-v4-flash-0731 / glm-5.2 / glm-5.1） |
-| 积分 / 领取 | 卡片上直接看与点；也保留了 `/officeace credits` / `/officeace claim` 命令 |
-| 续期 | 凭据是 ~2 小时的 STS 临时凭据，每 30 分钟自动续期一次（`refresh_token` 一次性，故只在这一个入口续） |
+| **多账号** | 一条渠道可挂多个账号（各自一份凭据），**请求失败按顺序换号**（只在还没吐出内容时换；上限 3 个） |
+| 登录 | 点「＋ 添加账号」→ **浏览器完成华为云授权**（宿主打开浏览器，客户端留链接兜底）；无需 OfficeAce 客户端、无需 API Key |
+| 模型清单 | 先试远端 `GET <网关>/v1/models`，失败回落静态集；**被关掉的模型从 dsh 的模型选择器里消失** |
+| 续期 | 凭据是 ~2 小时的 STS 临时凭据：每 30 分钟自动续期一次（`refresh_token` 一次性，故只在这一个入口续），401 时再补一次 |
+
+**没有命令**：登录/看数据全在卡片上，不需要在输入栏敲东西。
 
 界面的数据走本插件自己的**同源路由** `/api/officeace/*`（宿主半身用
 `server.register({kind:'prefix', path})` 挂上）：
 
 | 路由 | 作用 |
 |---|---|
-| `GET /status` | 登录态 / `accessKey` / `expiresAt` / 网关 / 可见模型数 |
-| `POST /login` | 起 OAuth，返回 `loginUrl`（浏览器半身负责打开，并轮询 `/status` 等回调完成） |
-| `GET /credits` | `{ total, packages[] }` |
-| `POST /claim` | 领取每日奖励 |
-| `POST /logout` | 清除本机凭据 |
+| `GET /status` | 账号列表（id/昵称/启用/accessKey/到期/可续期）+ 模型清单（含每项 `disabled`） |
+| `POST /login` | 起 OAuth，返回 `loginUrl` 与新账号 id（宿主打开浏览器，客户端轮询等回调完成） |
+| `GET /credits` | 逐账号积分（`{accounts:[{id,ok,total,packages,error}], total}`） |
+| `POST /claim` | 逐账号领取每日奖励并汇总 |
+| `POST /accounts/<id>/enable` | 启用/停用该账号 |
+| `POST /accounts/<id>/refresh` | 续期该账号并回写 |
+| `POST /accounts/<id>/remove` | 移除该账号（连凭据一起清） |
+| `GET /accounts/<id>/test` | 用该账号实拉一次模型清单（连通性 + 耗时） |
+| `POST /models/disable` | `{model, disabled}` 单个模型开关 |
+| `POST /models/disableAll` | `{disabled}` 全部开关 |
+
+**落盘位置**：账号池与模型黑名单在 `~/.dsh/officeace/state.json`；凭据本体在 dsh 的凭据服务里，
+每个账号一份（ref `OFFICEACE_ACCOUNT_1/2/…`）。早先单账号版本用的 `OFFICEACE_ACCESS_KEY_ID`
+会在首次加载时被**自动收编为 1 号账号**，不必重新登录。
 
 浏览器半身是**手写的 ModuleLoader bundle**（`client.js`，**无构建步骤**，除 shell 已提供的
 `react` 外无依赖），配色一律取主题变量 `--dsw-alias-*`，因此深/浅色切换都能跟。
