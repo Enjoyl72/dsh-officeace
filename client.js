@@ -290,7 +290,7 @@ window.__ModuleLoader__.load({
             setNotice('续期完成')
             await load(true)
           }), { disabled: busy !== '' || accounts.length === 0 }),
-          chip('⟳ 余额', () => withBusy('credits', loadCredits), { disabled: busy !== '' || accounts.length === 0 }),
+          chip('⟳ 积分', () => withBusy('credits', loadCredits), { disabled: busy !== '' || accounts.length === 0 }),
           chip('🎁 领取', () => withBusy('claim', async () => {
             const result = await post('/claim', {}, 60000)
             const rows = Array.isArray(result.accounts) ? result.accounts : []
@@ -368,7 +368,7 @@ window.__ModuleLoader__.load({
           ? h('div', { style: { borderTop: `1px solid ${C.border}`, paddingTop: 10, marginTop: 4 } },
             h('div', { style: { fontSize: 13, color: C.text } },
               credits === undefined
-                ? '积分：查询中…（点「⟳ 余额」重查）'
+                ? '积分：查询中…（点「⟳ 积分」重查）'
                 : credits?.error !== undefined ? `积分读取失败：${credits.error}` : `总积分 ${fmt(credits?.total ?? 0)}`),
             ...(Array.isArray(credits?.accounts) ? credits.accounts : []).map((row) => h('div', {
               key: `c-${row.id}`,
