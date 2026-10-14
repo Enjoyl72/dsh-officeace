@@ -136,7 +136,15 @@ window.__ModuleLoader__.load({
           chip(busy === `refresh-${account.id}` ? '续期中…' : '续期', () => onRefresh(account), { disabled: busy !== '' }),
           chip(account.enabled ? '停用' : '启用', () => onToggle(account), { disabled: busy !== '' }),
           chip('移除', () => onRemove(account), { disabled: busy !== '', danger: true }),
-          testText.length > 0 ? h('span', { style: { fontSize: 11, color: C.faint } }, testText) : null))
+          testText.length > 0
+            ? h('span', {
+              style: { fontSize: 11, color: testText.startsWith('测试失败') || testText.startsWith('连接失败') ? C.bad : C.faint, wordBreak: 'break-all' }
+            }, testText)
+            : null),
+        account.modelInfoError.length > 0
+          ? h('div', { style: { fontSize: 11, color: C.bad, marginTop: 4, wordBreak: 'break-all' } },
+            `上次取网关密钥失败：${account.modelInfoError}（点「续期」重试）`)
+          : null)
     }
 
     // ── 模型行 ──
