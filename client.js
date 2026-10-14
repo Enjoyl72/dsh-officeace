@@ -119,6 +119,7 @@ window.__ModuleLoader__.load({
         h('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
           h('span', { style: { fontSize: 13, color: C.text } }, account.nickname || shortKey(account.accessKey)),
           badge(account.enabled ? '启用' : '已停用', account.enabled ? 'ok' : undefined),
+          account.limitedUntil > 0 ? badge(`限流至 ${when(account.limitedUntil)}`, 'bad') : null,
           h('span', { style: { flex: 1 } }),
           h('span', { style: { fontSize: 11, color: C.faint } },
             account.expiresAt === null ? '到期未知' : `到期 ${when(account.expiresAt)}`)),
@@ -227,15 +228,22 @@ window.__ModuleLoader__.load({
           tries += 1
           try {
             const next = await get('/status')
+            setData(next)
             if ((next?.accounts?.length ?? 0) > before) {
               clearInterval(pollRef.current)
               pollRef.current = null
               setBusy('')
               setNotice('登录成功')
               setLink('')
-              setData(next)
               void loadCredits()
               return
+            }
+            // 宿主已经把失败原因写进账号池：不用再等满 3 分钟
+            if (next?.login?.status === 'failed') {
+              clearInterval(pollRef.current)
+              pollRef.current = null
+              setBusy('')
+              setNotice('')
             }
           } catch {
             /* 轮询失败继续等 */
@@ -367,6 +375,12 @@ window.__ModuleLoader__.load({
               h('span', { style: { minWidth: 64 } }, row.id),
               h('span', { style: { flex: 1, color: row.ok ? C.text : C.faint } },
                 row.ok ? (row.packages ?? []).map((p) => `${p.name} ${fmt(p.total)}`).join(' · ') : (row.error ?? '—')))))
+          : null,
+
+        // 登录会话（宿主写进账号池）：失败原因直接摆出来，不用去翻日志
+        data?.login?.status === 'failed'
+          ? h('div', { style: { fontSize: 12, color: C.bad, wordBreak: 'break-all' } },
+            `上次登录未完成：${data.login.error ?? '未知原因'}`)
           : null,
 
         notice.length > 0 ? h('div', { style: { fontSize: 12, color: C.faint } }, notice) : null,
