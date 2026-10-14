@@ -19,7 +19,14 @@ window.__ModuleLoader__.load({
     const { createElement: h, useState, useEffect, useRef, useCallback } = React
 
     const inject = ['slots']
-    const API = '/api/officeace'
+    // 与上游同款：按 document.baseURI 解析，dsh 若挂在子路径下也能命中（不要写死 '/api/...'）
+    const API = (() => {
+      try {
+        return new URL('api/officeace', document.baseURI).pathname
+      } catch {
+        return '/api/officeace'
+      }
+    })()
 
     // ── 主题取色（都是 shell 提供的 CSS 变量）──
     const C = {
@@ -110,6 +117,8 @@ window.__ModuleLoader__.load({
       const [credits, setCredits] = useState(undefined)
       const [busy, setBusy] = useState('')
       const [notice, setNotice] = useState('')
+      /** 授权链接（浏览器没自动弹出时的兜底） */
+      const [link, setLink] = useState('')
       const pollRef = useRef(null)
 
       const loadStatus = useCallback(async () => {
@@ -145,12 +154,12 @@ window.__ModuleLoader__.load({
 
       const login = async () => {
         setBusy('login')
-        setNotice('已打开浏览器，请在浏览器里完成华为云授权…')
+        setNotice('正在启动本地回调…')
+        let loginUrl = ''
         try {
-          const { loginUrl } = await post('/login', {}, 60000)
-          if (typeof loginUrl === 'string' && loginUrl.length > 0) {
-            window.open(loginUrl, '_blank', 'noopener')
-          } else {
+          const result = await post('/login', {}, 60000)
+          loginUrl = typeof result?.loginUrl === 'string' ? result.loginUrl : ''
+          if (loginUrl.length === 0) {
             setNotice('未能取得授权链接')
             setBusy('')
             return
@@ -160,6 +169,9 @@ window.__ModuleLoader__.load({
           setBusy('')
           return
         }
+        // 浏览器由**宿主**打开（桌面端比 window.open 可靠）；这里再给一次链接兜底。
+        setNotice('已打开浏览器完成华为云授权；若没弹出，请手动打开页面下方的链接。')
+        setLink(loginUrl)
         // 轮询等回调完成（最多 ~3 分钟）
         let tries = 0
         if (pollRef.current !== null) clearInterval(pollRef.current)
@@ -171,6 +183,7 @@ window.__ModuleLoader__.load({
             pollRef.current = null
             setBusy('')
             setNotice('登录成功')
+            setLink('')
             void loadCredits(true)
             return
           }
@@ -202,6 +215,7 @@ window.__ModuleLoader__.load({
           await post('/logout')
           setCredits(undefined)
           setNotice('已退出')
+          setLink('')
           await loadStatus()
         } catch (error) {
           setNotice(`退出失败：${String(error?.message ?? error)}`)
@@ -271,6 +285,16 @@ window.__ModuleLoader__.load({
 
         notice.length > 0
           ? h('div', { style: { fontSize: 12, color: C.faint } }, notice)
+          : null,
+
+        // 授权链接兜底：浏览器没自动弹出时点这里
+        link.length > 0
+          ? h('a', {
+            href: link,
+            target: '_blank',
+            rel: 'noopener',
+            style: { fontSize: 12, color: C.accent, wordBreak: 'break-all' }
+          }, link)
           : null)
     }
 
