@@ -203,9 +203,14 @@ officeace: 渠道已注册（provider "officeace"）
 
 ## 已知局限
 
-- **工具历史折成文本**：历史里的 `tool-call`/`tool-result` 转成文本行（兼容面最广），
-  当前请求的 `tools` 仍按原生声明——这样模型能正常调用工具。
+- **工具历史按原生结构发**（assistant 带 `tool_calls` + 紧跟 `role:'tool'`），与其他渠道一致。
+  ⚠️ 有一条硬约束：`role:'tool'` 必须紧跟在**声明了该 `tool_call_id`** 的 assistant 之后，
+  否则网关整轮 400（`ModelArts.81001`）。所以历史对不上时（被裁剪、id 缺失、跨会话拼接）
+  会自动**降级成文本**发出去 —— 宁可少点结构，也不让整轮挂掉。
 - **不发 `temperature`**：请求体照抄实测可用的形状。
+- **不解析 DSML**：华为这边 DeepSeek 系模型有个"文本化工具调用"的方言（`<｜DSML｜call>`），
+  上游的 codearts 渠道专门为它做了 prompt + 解析器。本渠道**不声明 `tools` 时**也可能撞上它，
+  但实际使用中 `tools` 总是声明着的（实测此时模型一律走原生 `tool_calls`），故暂不处理。
 - **纯逆向**：OfficeAce 客户端 / 华为云 MaaS 一改就可能失效，届时按上面的端点表重新核对。
 
 ## 许可
