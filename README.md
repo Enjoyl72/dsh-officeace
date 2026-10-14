@@ -114,6 +114,22 @@ officeace: 渠道已注册（provider "officeace"，凭据引用 OFFICEACE_ACCES
 - **不发 `temperature`**：请求体照抄实测可用的形状。
 - **纯逆向**：OfficeAce 客户端 / 华为云 MaaS 一改就可能失效，届时按上面的端点表重新核对。
 
+## 自检（离线，不需要 dsh / 真账号 / 联网）
+
+```bash
+# 内核 peer 依赖要从 profile 解析，所以必须在 profile 目录里跑
+cd %USERPROFILE%\.dsh\profiles\desktop
+node node_modules/dsh-officeace/tools/selftest.mjs
+```
+
+覆盖 67 项：**每条路由**（含未知账号/缺参数/未知路径的边界）、**账号池**（限流记账按模型粒度、
+登录状态落盘、`nextRef` 不撞 id）、**协议层**（PKCE / DPoP 64 字节签名 / SDK-HMAC 与 V11 的
+Authorization 形状 / 余额汇总）、**适配器**（模型开关过滤、远端失败回落静态集、失败换号、
+429 记账后跳过该账号），以及**「浏览器半身调用的路径」与「宿主注册的路径」的交叉核对**
+（客户端调了宿主没注册的路径 → 运行时就是 404，这类最容易漏）。
+
+自检**覆盖不到**的（只能真机看）：真实网关的请求/响应、华为云授权流程、界面渲染。
+
 ## 许可
 
 MIT（见 `LICENSE`）。协议细节来自对 OfficeAce 客户端与华为云接口的逆向；本渠道仅供**用户对
