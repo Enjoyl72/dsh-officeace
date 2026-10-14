@@ -13,15 +13,26 @@
 
 | 能力 | 说明 |
 |---|---|
+| **界面卡片** | dsh 的**设置**里有一页「果办OfficeAce」：登录按钮、登录态与到期、网关、模型数、**积分明细**、每日领取、退出 |
 | 对话 | 注册 provider `officeace`，模型出现在 dsh 的模型选择器里，直接选即可 |
 | 登录 | **浏览器完成华为云授权**，无需 OfficeAce 客户端、无需 API Key；回调落在本机端口 |
 | 模型清单 | 先试远端 `GET <网关>/v1/models`，失败回落静态集（deepseek-v4.1-flash / deepseek-v4-flash-0731 / glm-5.2 / glm-5.1） |
-| 积分 | `/officeace credits` 列出主积分与各活动池 |
-| 每日领取 | `/officeace claim` |
+| 积分 / 领取 | 卡片上直接看与点；也保留了 `/officeace credits` / `/officeace claim` 命令 |
 | 续期 | 凭据是 ~2 小时的 STS 临时凭据，每 30 分钟自动续期一次（`refresh_token` 一次性，故只在这一个入口续） |
 
-**没有**渠道卡 UI：dsh 没有给"账号登录式渠道"预留任何插槽或 RPC，原插件那套卡片是它自己在
-客户端半身里手写的。本包刻意只做宿主半身 —— 因此更小、更稳、也不受上游 UI 改动影响。
+界面的数据走本插件自己的**同源路由** `/api/officeace/*`（宿主半身用
+`server.register({kind:'prefix', path})` 挂上）：
+
+| 路由 | 作用 |
+|---|---|
+| `GET /status` | 登录态 / `accessKey` / `expiresAt` / 网关 / 可见模型数 |
+| `POST /login` | 起 OAuth，返回 `loginUrl`（浏览器半身负责打开，并轮询 `/status` 等回调完成） |
+| `GET /credits` | `{ total, packages[] }` |
+| `POST /claim` | 领取每日奖励 |
+| `POST /logout` | 清除本机凭据 |
+
+浏览器半身是**手写的 ModuleLoader bundle**（`client.js`，**无构建步骤**，除 shell 已提供的
+`react` 外无依赖），配色一律取主题变量 `--dsw-alias-*`，因此深/浅色切换都能跟。
 
 ## 安装
 
